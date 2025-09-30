@@ -153,17 +153,10 @@ public class AzureBlobBackupProvider implements BackupProvider {
           options.setPath(finalPrefix);
           Iterator<PagedResponse<PathItem>> responses;
           try {
-              if (pageSize > 0) {
                   responses = fsClient
                       .listPaths(options, LIST_PATHS_TIMEOUT)
-                      .iterableByPage(paginationKey, pageSize)
+                      .iterableByPage(paginationKey, pageSize > 0 ? pageSize : 1000)
                       .iterator();
-              } else {
-                  responses = fsClient
-                      .listPaths(options, LIST_PATHS_TIMEOUT)
-                      .iterableByPage(paginationKey)
-                      .iterator();
-              }
           } catch (DataLakeStorageException e) {
               if (e.getErrorCode().equals("PathNotFound")) {
                   return new BackupProvider.KeysPage(Collections.emptyList(), null);
