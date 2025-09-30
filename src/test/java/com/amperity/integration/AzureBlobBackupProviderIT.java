@@ -1,4 +1,4 @@
-package com.rpl.integration;
+package com.amperity.integration;
 
 import com.rpl.rama.backup.BackupProvider;
 import com.rpl.rama.backup.BackupProviderTester;
@@ -18,9 +18,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class AzureBlobBackupProviderIT {
-
-  // TODO: get from env
-  private static final String location = "amperityaztest:test/brandon91";
 
   private static void assertEquals(Object expected, Object val) {
     if (expected == null && val != null || expected != null && !expected.equals(val)) {
@@ -44,7 +41,8 @@ public class AzureBlobBackupProviderIT {
       testing("An Azure Blob provider");
       BackupProvider provider;
 
-      provider = new AzureBlobBackupProvider(location);
+      // TODO: get from env
+      provider = new AzureBlobBackupProvider("amperityaztest:test/brandon91");
 
       testing("  when empty");
 
@@ -52,22 +50,22 @@ public class AzureBlobBackupProviderIT {
       {
         BackupProvider.KeysPage page = provider.listKeysNonRecursive("", null, 1000).get();
         assertEquals(Collections.emptyList(), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       {
         BackupProvider.KeysPage page = provider.listKeysRecursive("", null).get();
         assertEquals(Collections.emptyList(), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
 
       testing("    returns false for hasKey on a non-existing key");
-      assert !provider.hasKey(k).get();
+      assertEquals(false, provider.hasKey(k).get());
 
       testing("  when a key is added,");
       provider.putObject(k, new ByteArrayInputStream("abc".getBytes()), 3L).get();
 
       testing("    returns true for hasKey on the added key");
-      assert provider.hasKey(k).get();
+      assertEquals(true, provider.hasKey(k).get());
 
       testing("    getObject returns an InputStream for the contents");
       {
@@ -82,38 +80,38 @@ public class AzureBlobBackupProviderIT {
       {
         BackupProvider.KeysPage page = provider.listKeysNonRecursive("a/b/", null, 1000).get();
         assertEquals(Arrays.asList("c"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       {
         BackupProvider.KeysPage page = provider.listKeysRecursive("", null).get();
         assertEquals(Arrays.asList("a/b/c"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       testing("    lists the root directory elements");
       {
         BackupProvider.KeysPage page = provider.listKeysNonRecursive("a/", null, 1000).get();
         assertEquals(Arrays.asList("b"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       {
         BackupProvider.KeysPage page = provider.listKeysRecursive("a/", null).get();
         assertEquals(Arrays.asList("a/b/c"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       {
         BackupProvider.KeysPage page = provider.listKeysRecursive("a", null).get();
         assertEquals(Arrays.asList("a/b/c"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       {
         BackupProvider.KeysPage page = provider.listKeysRecursive("a/b", null).get();
         assertEquals(Arrays.asList("a/b/c"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       {
         BackupProvider.KeysPage page = provider.listKeysRecursive("a/b/", null).get();
         assertEquals(Arrays.asList("a/b/c"), page.keys);
-        assert page.nextPageMarker == null;
+        assertEquals(null, page.nextPageMarker);
       }
       testing("  paginated list keys");
       {
@@ -138,6 +136,7 @@ public class AzureBlobBackupProviderIT {
             for(int i=0; i<1100; i++) {
               futures.add(provider.putObject("z/" + zeroPad(i, 4), new ByteArrayInputStream(content), 3L));
             }
+            testing("  beginning derefs");
             futures.forEach(f -> {
                 try {
                     f.get();
@@ -145,6 +144,7 @@ public class AzureBlobBackupProviderIT {
                     throw new RuntimeException("Failed", e);
                 }
             });
+            testing("  end derefs");
             BackupProvider.KeysPage page = provider.listKeysNonRecursive("z/", null, -1).get();
             List expected = new ArrayList();
             for(int i=0; i<1000; i++) expected.add(zeroPad(i, 4));
@@ -183,7 +183,8 @@ public class AzureBlobBackupProviderIT {
       testing("An Azure Blob provider");
       BackupProvider provider;
 
-      provider = new AzureBlobBackupProvider(location);
+      // TODO: get from env
+      provider = new AzureBlobBackupProvider("amperityaztest:test/brandon92");
 
       BackupProviderTester.testProvider(provider);
 

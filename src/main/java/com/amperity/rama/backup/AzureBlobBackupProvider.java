@@ -22,6 +22,8 @@ import org.slf4j.LoggerFactory;
 import com.azure.core.credential.TokenCredential;
 import com.azure.core.http.rest.PagedResponse;
 import com.azure.identity.DefaultAzureCredentialBuilder;
+import com.azure.storage.blob.models.BlobErrorCode;
+import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.file.datalake.DataLakeFileSystemClient;
 import com.azure.storage.file.datalake.DataLakeServiceClient;
 import com.azure.storage.file.datalake.DataLakePathClient;
@@ -79,7 +81,21 @@ public class AzureBlobBackupProvider implements BackupProvider {
   public <T extends InputStream> CompletableFuture<T> getObject(final String key) {
       logInfo("get '%s'", rootPrefix + key);
       return CompletableFuture.<T>supplyAsync(() -> {
-          return (T) fsClient.getFileClient(rootPrefix + key).openInputStream().getInputStream();
+          try {
+              return (T) fsClient.getFileClient(rootPrefix + key).openInputStream().getInputStream();
+          } catch (BlobStorageException e) {
+              if (e.getErrorCode().equals(BlobErrorCode.BLOB_NOT_FOUND)) {
+                  return null;
+              } else {
+                  throw e;
+              }
+          } catch (DataLakeStorageException e) {
+              if (e.getErrorCode().equals("PathNotFound")) {
+                  return null;
+              } else {
+                  throw e;
+              }
+          }
       });
   }
 
@@ -119,7 +135,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           try {
           responses = fsClient
               .listPaths(options, LIST_PATHS_TIMEOUT)
-              .iterableByPage(paginationKey)
+              .iterableByPage(paginationKey, 1000)
               .iterator();
           } catch (DataLakeStorageException e) {
               if (e.getErrorCode().equals("PathNotFound")) {
