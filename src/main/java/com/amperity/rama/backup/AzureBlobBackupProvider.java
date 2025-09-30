@@ -1,0 +1,189 @@
+package com.amperity.rama.backup;
+
+import com.rpl.rama.backup.BackupProvider;
+import com.rpl.rama.backup.BackupProvider.KeysPage;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Collections;
+import java.util.List;
+import java.util.Iterator;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.azure.core.credential.TokenCredential;
+import com.azure.core.http.rest.PagedResponse;
+import com.azure.identity.DefaultAzureCredentialBuilder;
+import com.azure.storage.file.datalake.DataLakeFileSystemClient;
+import com.azure.storage.file.datalake.DataLakeServiceClient;
+import com.azure.storage.file.datalake.DataLakePathClient;
+import com.azure.storage.file.datalake.DataLakeServiceClientBuilder;
+import com.azure.storage.file.datalake.models.ListPathsOptions;
+import com.azure.storage.file.datalake.models.PathItem;
+import com.azure.storage.file.datalake.models.DataLakeStorageException;
+
+/***
+ * An implementation of a Rama BackupProvider for Azure Blob.
+ */
+public class AzureBlobBackupProvider implements BackupProvider {
+  private static final Logger LOGGER = LoggerFactory.getLogger(AzureBlobBackupProvider.class);
+
+
+  private final DataLakeFileSystemClient fsClient;
+  private final String rootPrefix;
+
+  private static final Duration LIST_PATHS_TIMEOUT = Duration.ofSeconds(30);
+
+  private static void logInfo(String fmt, String... args) {
+      LOGGER.info("INFO: " + String.format(fmt, args));
+  }
+
+  public AzureBlobBackupProvider(final String location) throws IllegalArgumentException {
+      String[] parts = location.split(":");
+      if (parts.length != 2) {
+          throw new IllegalArgumentException("Invalid argument to construct a backup provider: expected a string in the format <storage-account-name>:<blob-container-name>");
+      }
+      String storageAccountName = parts[0];
+      String containerName = parts[1];
+      int pathIndex = containerName.indexOf("/");
+      if (pathIndex == -1) {
+          rootPrefix = "";
+      } else {
+          String path = containerName.substring(pathIndex + 1);
+          if (path.endsWith("/")) {
+              rootPrefix = path;
+          } else {
+              rootPrefix = path + "/";
+          }
+          containerName = containerName.substring(0, pathIndex);
+      }
+      String endpoint = String.format("https://%s.dfs.core.windows.net/", storageAccountName);
+      TokenCredential credential = new DefaultAzureCredentialBuilder().build();
+      DataLakeServiceClient serviceClient = new DataLakeServiceClientBuilder()
+          .endpoint(endpoint)
+          .credential(credential)
+          .buildClient();
+      fsClient = serviceClient.getFileSystemClient(containerName);
+  }
+
+  @Override
+  @SuppressWarnings("unchecked")
+  public <T extends InputStream> CompletableFuture<T> getObject(final String key) {
+      logInfo("get '%s'", rootPrefix + key);
+      return CompletableFuture.<T>supplyAsync(() -> {
+          return (T) fsClient.getFileClient(rootPrefix + key).openInputStream().getInputStream();
+      });
+  }
+
+  @Override
+  public CompletableFuture<Void> putObject(final String key, final InputStream inputStream, final Long contentLength) {
+      logInfo("put '%s'", rootPrefix + key);
+      return CompletableFuture.runAsync(() -> {
+          fsClient.getFileClient(rootPrefix + key).upload(inputStream, contentLength);
+      });
+  }
+
+  @Override
+  public CompletableFuture<Void> deleteObject(final String key) {
+      logInfo("delete '%s'", rootPrefix + key);
+      return CompletableFuture.runAsync(() -> {
+          fsClient.getFileClient(rootPrefix + key).delete();
+      });
+  }
+
+  @Override
+  public CompletableFuture<Boolean> hasKey(final String key) {
+      logInfo("exists? '%s'", rootPrefix + key);
+      return CompletableFuture.supplyAsync(() -> {
+          return fsClient.getFileClient(rootPrefix + key).exists();
+      });
+  }
+
+  @Override
+  public CompletableFuture<BackupProvider.KeysPage> listKeysRecursive(final String prefix, final String paginationKey) {
+      return CompletableFuture.supplyAsync(() -> {
+          String finalPrefix = rootPrefix + prefix;
+          logInfo("listRecursive '%s'", finalPrefix);
+          ListPathsOptions options = new ListPathsOptions();
+          options.setPath(finalPrefix);
+          options.setRecursive(true);
+          Iterator<PagedResponse<PathItem>> responses;
+          try {
+          responses = fsClient
+              .listPaths(options, LIST_PATHS_TIMEOUT)
+              .iterableByPage(paginationKey)
+              .iterator();
+          } catch (DataLakeStorageException e) {
+              if (e.getErrorCode().equals("PathNotFound")) {
+                  return new BackupProvider.KeysPage(Collections.emptyList(), null);
+              } else {
+                  throw e;
+              }
+          }
+          if (responses.hasNext()) {
+              PagedResponse<PathItem> response = responses.next();
+              List<String> keys = response
+                  .getElements()
+                  .stream()
+                  .filter(item -> !item.isDirectory())
+                  // modify paths to be relative to the backup provider's root
+                  .map(item -> item.getName().replaceFirst(rootPrefix, ""))
+                  .collect(Collectors.toList());
+              return new BackupProvider.KeysPage(keys, response.getContinuationToken());
+          } else {
+              return new BackupProvider.KeysPage(Collections.emptyList(), null);
+          }
+      });
+  }
+
+  @Override
+  public CompletableFuture<BackupProvider.KeysPage> listKeysNonRecursive(final String prefix, final String paginationKey, final int pageSize) {
+      return CompletableFuture.supplyAsync(() -> {
+          String finalPrefix = rootPrefix + prefix;
+          logInfo("listNonRecursive '%s'", finalPrefix);
+          ListPathsOptions options = new ListPathsOptions();
+          options.setPath(finalPrefix);
+          Iterator<PagedResponse<PathItem>> responses;
+          try {
+              responses = fsClient
+                  .listPaths(options, LIST_PATHS_TIMEOUT)
+                  .iterableByPage(paginationKey)
+                  .iterator();
+          } catch (DataLakeStorageException e) {
+              if (e.getErrorCode().equals("PathNotFound")) {
+                  return new BackupProvider.KeysPage(Collections.emptyList(), null);
+              } else {
+                  throw e;
+              }
+          }
+          if (responses.hasNext()) {
+              PagedResponse<PathItem> response = responses.next();
+              List<String> keys = response
+                  .getElements()
+                  .stream()
+                  .filter(item -> !item.isDirectory())
+                  // modify paths to be relative to the requested prefix
+                  .map(item -> {
+                      logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
+                      return item.getName().replaceFirst(finalPrefix, "");
+                    })
+                  .collect(Collectors.toList());
+              return new BackupProvider.KeysPage(keys, response.getContinuationToken());
+          } else {
+              return new BackupProvider.KeysPage(Collections.emptyList(), null);
+          }
+      });
+  }
+
+  @Override
+  public void close() {
+  }
+}

@@ -2,7 +2,7 @@ package com.rpl.integration;
 
 import com.rpl.rama.backup.BackupProvider;
 import com.rpl.rama.backup.BackupProviderTester;
-import com.rpl.rama.backup.s3.S3BackupProvider;
+import com.amperity.rama.backup.AzureBlobBackupProvider;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -15,9 +15,11 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import software.amazon.awssdk.regions.Region;
 
-public class S3BackupProviderIT {
+public class AzureBlobBackupProviderIT {
+
+  // TODO: get from env
+  private static final String location = "amperityaztest:test/brandon4";
 
   private static void assertEquals(Object expected, Object val) {
     if (expected == null && val != null || expected != null && !expected.equals(val)) {
@@ -33,30 +35,15 @@ public class S3BackupProviderIT {
     return String.format("%0" + length + "d", num);
   }
 
-  public void testS3Provider() throws Exception {
+  public void testAzureBlobProvider() throws Exception {
     final String k = "a/b/c";
-    final java.nio.file.Path dir = Files.createTempDirectory("testS3Provider");
+    final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
 
     try {
-      testing("An S3 provider");
+      testing("An Azure Blob provider");
       BackupProvider provider;
 
-      if (System.getenv("AWS_ACCESS_KEY_ID") != null) {
-        provider = new S3BackupProvider("rama-s3-provider-testbucket");
-      } else {
-        // Any credentials found by the client's default credential chain will do,
-        // as s3Mock doesn't check them.
-        System.setProperty("aws.region", Region.US_WEST_1.id());
-        System.setProperty("aws.accessKeyId", "something");
-        System.setProperty("aws.secretAccessKey", "else");
-
-        // An S3BackupProvider instance,
-        int port = Integer.getInteger("it.s3mock.port_http", 9090);
-        String host = System.getProperty("it.s3mock.host", "localhost");
-        URI uri = new URI("http", null, host, port, "/testbucket", null, null);
-        provider = new S3BackupProvider(uri.toString());
-      }
-
+      provider = new AzureBlobBackupProvider(location);
 
       testing("  when empty");
 
@@ -180,28 +167,14 @@ public class S3BackupProviderIT {
     }
   }
 
-  public void testS3ProviderTester() throws Exception {
-    final java.nio.file.Path dir = Files.createTempDirectory("testS3Provider");
+  public void testAzureBlobProviderTester() throws Exception {
+    final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
 
     try {
-      testing("An S3 provider");
+      testing("An Azure Blob provider");
       BackupProvider provider;
 
-      if (System.getenv("AWS_ACCESS_KEY_ID") != null) {
-        provider = new S3BackupProvider("rama-s3-provider-testbucket");
-      } else {
-        // Any credentials found by the client's default credential chain will do,
-        // as s3Mock doesn't check them.
-        System.setProperty("aws.region", Region.US_WEST_1.id());
-        System.setProperty("aws.accessKeyId", "something");
-        System.setProperty("aws.secretAccessKey", "else");
-
-        // An S3BackpProvider instance,
-        int port = Integer.getInteger("it.s3mock.port_http", 9090);
-        String host = System.getProperty("it.s3mock.host", "localhost");
-        URI uri = new URI("http", null, host, port, "/testbucket2", null, null);
-        provider = new S3BackupProvider(uri.toString());
-      }
+      provider = new AzureBlobBackupProvider(location);
 
       BackupProviderTester.testProvider(provider);
 

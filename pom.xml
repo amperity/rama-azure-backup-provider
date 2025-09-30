@@ -3,11 +3,10 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.rpl</groupId>
-  <artifactId>rama-s3-backup-provider</artifactId>
+  <artifactId>rama-azure-blob-backup-provider</artifactId>
   <version>1.1.0</version>
-  <name>S3 Backup Provider</name>
-  <description>A backup provider for Rama clusters that stores data in
-      an S3 bucket on AWS.</description>
+  <name>Azure Blob Backup Provider</name>
+  <description>A backup provider for Rama clusters that stores data in Azure Blob.</description>
 
   <organization>
     <name>Red Planet Labs</name>
@@ -30,11 +29,9 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <!-- This provides versions for the various aws packages, which
-             may not be identical to the top level version -->
-        <groupId>software.amazon.awssdk</groupId>
-        <artifactId>bom</artifactId>
-        <version>2.30.16</version>
+        <groupId>com.azure</groupId>
+        <artifactId>azure-sdk-bom</artifactId>
+        <version>1.2.38</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
@@ -43,143 +40,49 @@
 
   <dependencies>
     <dependency>
-      <groupId>com.rpl</groupId>
-      <artifactId>rama</artifactId>
-      <version>0.0.6-SNAPSHOT</version>
-      <scope>provided</scope>
-      <exclusions>
-        <exclusion>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>commons-logging</groupId>
-            <artifactId>commons-logging</artifactId>
-        </exclusion>
-      </exclusions>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-core</artifactId>
+      <version>1.5.18</version>
     </dependency>
 
+<dependency>
+    <groupId>ch.qos.logback</groupId>
+    <artifactId>logback-classic</artifactId>
+    <version>1.5.18</version>
+</dependency>
     <dependency>
-      <groupId>software.amazon.awssdk</groupId>
-      <artifactId>s3</artifactId>
-      <exclusions>
-        <exclusion>
-            <groupId>io.netty</groupId>
-            <artifactId>*</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>org.slf4j</groupId>
-            <artifactId>*</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>commons-logging</groupId>
-            <artifactId>commons-logging</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>org.apache.httpcomponents</groupId>
-            <artifactId>httpclient</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>org.apache.httpcomponents</groupId>
-            <artifactId>httpcore</artifactId>
-        </exclusion>
-      </exclusions>
+      <groupId>com.rpl</groupId>
+      <artifactId>rama</artifactId>
+      <version>1.1.0</version>
+      <!--<scope>provided</scope>-->
     </dependency>
     <dependency>
-      <groupId>software.amazon.awssdk</groupId>
-      <artifactId>sts</artifactId>
-      <exclusions>
-        <exclusion>
-            <groupId>org.apache.httpcomponents</groupId>
-            <artifactId>httpclient</artifactId>
-        </exclusion>
-        <exclusion>
-            <groupId>org.apache.httpcomponents</groupId>
-            <artifactId>httpcore</artifactId>
-        </exclusion>
-      </exclusions>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-storage-blob</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-storage-file-datalake</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-identity</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-core</artifactId>
     </dependency>
   </dependencies>
 
   <repositories>
     <repository>
-      <id>clojars.org</id>
-      <url>https://clojars.org/repo</url>
+      <id>redplanetlabs</id>
+      <url>https://nexus.redplanetlabs.com/repository/maven-public-releases</url>
     </repository>
   </repositories>
 
   <build>
     <plugins>
-      <plugin>
-        <groupId>io.fabric8</groupId>
-        <artifactId>docker-maven-plugin</artifactId>
-        <version>0.43.4</version>
-        <configuration combine.self="override">
-          <verbose>true</verbose>
-          <!-- Even if this profile is active, we do not start the
-                 Docker container if the tests are skipped, since it is
-                 only used for the integration tests. -->
-          <skip>${skipTests}</skip>
-          <images>
-            <image>
-              <alias>s3mock</alias>
-              <name>adobe/s3mock</name>
-              <run>
-                <log>
-                  <enabled>true</enabled>
-                </log>
-                <ports>
-                  <port>+docker.host.ip:it.s3mock.port_http:9090</port>
-                  <port>+docker.host.ip:it.s3mock.port_https:9191</port>
-                </ports>
-                <wait>
-                  <http>
-                    <url>http://${docker.host.ip}:${it.s3mock.port_http}/favicon.ico</url>
-                  </http>
-                  <time>30000</time>
-                </wait>
-                <env>
-                  <COM_ADOBE_TESTING_S3MOCK_REGION>eu-west-1</COM_ADOBE_TESTING_S3MOCK_REGION>
-                </env>
-                <memory>128000000</memory>
-              </run>
-            </image>
-          </images>
-        </configuration>
-        <executions>
-          <execution>
-            <id>start-docker-image</id>
-            <goals>
-              <goal>start</goal>
-            </goals>
-            <phase>pre-integration-test</phase>
-          </execution>
-          <execution>
-            <id>stop-docker-image</id>
-            <goals>
-              <goal>stop</goal>
-            </goals>
-            <phase>post-integration-test</phase>
-          </execution>
-        </executions>
-      </plugin>
-
-      <!-- <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.12.0</version>
-        <configuration>
-          &gt;
-          <compilerArgs>
-            <arg>-Xlint:all</arg>
-          </compilerArgs>
-        </configuration>
-      </plugin> -->
-
       <plugin>
         <artifactId>maven-enforcer-plugin</artifactId>
         <version>3.4.1</version>
@@ -244,41 +147,6 @@
         </plugin>
     </plugins>
   </build>
-
-        <!-- <finalName>${custom.final.name}</finalName>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.22.0</version>
-                <configuration>
-                    <trimStackTrace>false</trimStackTrace>
-                    <skipTests>false</skipTests>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>versions-maven-plugin</artifactId>
-                <version>2.10.0</version>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-help-plugin</artifactId>
-                <version>3.2.0</version>
-            </plugin>
-            <plugin>
-          			<groupId>org.apache.maven.plugins</groupId>
-          			<artifactId>maven-javadoc-plugin</artifactId>
-          			<executions>
-          				<execution>
-            					<id>attach-javadocs</id>
-            					<goals>
-            					    <goal>jar</goal>
-            					</goals>
-          				</execution>
-          			</executions>
-        		</plugin>
-        </plugins> -->
 
   <distributionManagement>
       <repository>
