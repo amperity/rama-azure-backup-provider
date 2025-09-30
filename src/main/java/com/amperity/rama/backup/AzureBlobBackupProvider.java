@@ -153,10 +153,17 @@ public class AzureBlobBackupProvider implements BackupProvider {
           options.setPath(finalPrefix);
           Iterator<PagedResponse<PathItem>> responses;
           try {
-              responses = fsClient
-                  .listPaths(options, LIST_PATHS_TIMEOUT)
-                  .iterableByPage(paginationKey)
-                  .iterator();
+              if (pageSize > 0) {
+                  responses = fsClient
+                      .listPaths(options, LIST_PATHS_TIMEOUT)
+                      .iterableByPage(paginationKey, pageSize)
+                      .iterator();
+              } else {
+                  responses = fsClient
+                      .listPaths(options, LIST_PATHS_TIMEOUT)
+                      .iterableByPage(paginationKey)
+                      .iterator();
+              }
           } catch (DataLakeStorageException e) {
               if (e.getErrorCode().equals("PathNotFound")) {
                   return new BackupProvider.KeysPage(Collections.emptyList(), null);
@@ -169,11 +176,16 @@ public class AzureBlobBackupProvider implements BackupProvider {
               List<String> keys = response
                   .getElements()
                   .stream()
-                  .filter(item -> !item.isDirectory())
-                  // modify paths to be relative to the requested prefix
                   .map(item -> {
                       logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
-                      return item.getName().replaceFirst(finalPrefix, "");
+                      if (item.isDirectory()) {
+                          if (prefix.endsWith("/")) {
+                              return Paths.get(item.getName()).getFileName().toString();
+                          } else {
+                              return Paths.get(item.getName()).toString();
+                          }
+                      }
+                      return Paths.get(item.getName()).getFileName().toString();
                     })
                   .collect(Collectors.toList());
               return new BackupProvider.KeysPage(keys, response.getContinuationToken());

@@ -13,13 +13,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class AzureBlobBackupProviderIT {
 
   // TODO: get from env
-  private static final String location = "amperityaztest:test/brandon4";
+  private static final String location = "amperityaztest:test/brandon91";
 
   private static void assertEquals(Object expected, Object val) {
     if (expected == null && val != null || expected != null && !expected.equals(val)) {
@@ -133,9 +134,17 @@ public class AzureBlobBackupProviderIT {
       testing("  large number of keys");
       {
             byte[] content = "abc".getBytes();
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
             for(int i=0; i<1100; i++) {
-              provider.putObject("z/" + zeroPad(i, 4), new ByteArrayInputStream(content), 3L).get();
+              futures.add(provider.putObject("z/" + zeroPad(i, 4), new ByteArrayInputStream(content), 3L));
             }
+            futures.forEach(f -> {
+                try {
+                    f.get();
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed", e);
+                }
+            });
             BackupProvider.KeysPage page = provider.listKeysNonRecursive("z/", null, -1).get();
             List expected = new ArrayList();
             for(int i=0; i<1000; i++) expected.add(zeroPad(i, 4));
