@@ -44,6 +44,8 @@ public class AzureBlobBackupProvider implements BackupProvider {
   private final String rootPrefix;
 
   private static final Duration LIST_PATHS_TIMEOUT = Duration.ofSeconds(30);
+  private static final int DEFAULT_PAGE_SIZE = 1000;
+  private static final String PATH_NOT_FOUND = "PathNotFound";
 
   private static void logInfo(String fmt, String... args) {
       LOGGER.info("INFO: " + String.format(fmt, args));
@@ -132,32 +134,28 @@ public class AzureBlobBackupProvider implements BackupProvider {
           ListPathsOptions options = new ListPathsOptions();
           options.setPath(finalPrefix);
           options.setRecursive(true);
-          Iterator<PagedResponse<PathItem>> responses;
+          PagedResponse<PathItem> response;
           try {
-          responses = fsClient
-              .listPaths(options, LIST_PATHS_TIMEOUT)
-              .iterableByPage(paginationKey, 1000)
-              .iterator();
+              response = fsClient
+                  .listPaths(options, LIST_PATHS_TIMEOUT)
+                  .iterableByPage(paginationKey, DEFAULT_PAGE_SIZE)
+                  .iterator()
+                  .next();
           } catch (DataLakeStorageException e) {
-              if (e.getErrorCode().equals("PathNotFound")) {
+              if (e.getErrorCode().equals(PATH_NOT_FOUND)) {
                   return new BackupProvider.KeysPage(Collections.emptyList(), null);
               } else {
                   throw e;
               }
           }
-          if (responses.hasNext()) {
-              PagedResponse<PathItem> response = responses.next();
-              List<String> keys = response
-                  .getElements()
-                  .stream()
-                  .filter(item -> !item.isDirectory())
-                  // modify paths to be relative to the backup provider's root
-                  .map(item -> item.getName().replaceFirst(rootPrefix, ""))
-                  .collect(Collectors.toList());
-              return new BackupProvider.KeysPage(keys, response.getContinuationToken());
-          } else {
-              return new BackupProvider.KeysPage(Collections.emptyList(), null);
-          }
+          List<String> keys = response
+              .getElements()
+              .stream()
+              .filter(item -> !item.isDirectory())
+              // modify paths to be relative to the backup provider's root
+              .map(item -> item.getName().replaceFirst(rootPrefix, ""))
+              .collect(Collectors.toList());
+          return new BackupProvider.KeysPage(keys, response.getContinuationToken());
       });
   }
 
@@ -168,12 +166,13 @@ public class AzureBlobBackupProvider implements BackupProvider {
           logInfo("listNonRecursive '%s'", finalPrefix);
           ListPathsOptions options = new ListPathsOptions();
           options.setPath(finalPrefix);
-          Iterator<PagedResponse<PathItem>> responses;
+          PagedResponse<PathItem> response;
           try {
-                  responses = fsClient
-                      .listPaths(options, LIST_PATHS_TIMEOUT)
-                      .iterableByPage(paginationKey, pageSize > 0 ? pageSize : 1000)
-                      .iterator();
+              response = fsClient
+                  .listPaths(options, LIST_PATHS_TIMEOUT)
+                  .iterableByPage(paginationKey, pageSize > 0 ? pageSize : DEFAULT_PAGE_SIZE)
+                  .iterator()
+                  .next();
           } catch (DataLakeStorageException e) {
               if (e.getErrorCode().equals("PathNotFound")) {
                   return new BackupProvider.KeysPage(Collections.emptyList(), null);
@@ -181,35 +180,30 @@ public class AzureBlobBackupProvider implements BackupProvider {
                   throw e;
               }
           }
-          if (responses.hasNext()) {
-              List<String> keys = new ArrayList<>();
-              String continuationToken = null;
-              boolean isDir = fsClient.getFileClient(finalPrefix).getProperties().isDirectory();
-              if (isDir && !finalPrefix.endsWith("/")) {
-                  keys.add(prefix);
-              } else {
-                  PagedResponse<PathItem> response = responses.next();
-                  response
-                      .getElements()
-                      .stream()
-                      .map(item -> {
-                          logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
-                          if (item.isDirectory()) {
-                              if (prefix.endsWith("/")) {
-                                  return Paths.get(item.getName()).getFileName().toString();
-                              } else {
-                                  return Paths.get(item.getName()).toString();
-                              }
-                          }
-                          return Paths.get(item.getName()).getFileName().toString();
-                      })
-                  .forEach(path -> keys.add(path));
-                  continuationToken = response.getContinuationToken();
-              }
-              return new BackupProvider.KeysPage(keys, continuationToken);
+          List<String> keys = new ArrayList<>();
+          String continuationToken = null;
+          boolean isDir = fsClient.getFileClient(finalPrefix).getProperties().isDirectory();
+          if (isDir && !finalPrefix.endsWith("/")) {
+              keys.add(prefix);
           } else {
-              return new BackupProvider.KeysPage(Collections.emptyList(), null);
+              response
+                  .getElements()
+                  .stream()
+                  .map(item -> {
+                      logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
+                      if (item.isDirectory()) {
+                          if (prefix.endsWith("/")) {
+                              return Paths.get(item.getName()).getFileName().toString();
+                          } else {
+                              return Paths.get(item.getName()).toString();
+                          }
+                      }
+                      return Paths.get(item.getName()).getFileName().toString();
+                  })
+              .forEach(path -> keys.add(path));
+              continuationToken = response.getContinuationToken();
           }
+          return new BackupProvider.KeysPage(keys, continuationToken);
       });
   }
 
