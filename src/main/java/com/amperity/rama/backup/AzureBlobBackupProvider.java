@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -181,23 +182,31 @@ public class AzureBlobBackupProvider implements BackupProvider {
               }
           }
           if (responses.hasNext()) {
-              PagedResponse<PathItem> response = responses.next();
-              List<String> keys = response
-                  .getElements()
-                  .stream()
-                  .map(item -> {
-                      logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
-                      if (item.isDirectory()) {
-                          if (prefix.endsWith("/")) {
-                              return Paths.get(item.getName()).getFileName().toString();
-                          } else {
-                              return Paths.get(item.getName()).toString();
+              List<String> keys = new ArrayList<>();
+              String continuationToken = null;
+              boolean isDir = fsClient.getFileClient(finalPrefix).getProperties().isDirectory();
+              if (isDir && !finalPrefix.endsWith("/")) {
+                  keys.add(prefix);
+              } else {
+                  PagedResponse<PathItem> response = responses.next();
+                  response
+                      .getElements()
+                      .stream()
+                      .map(item -> {
+                          logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
+                          if (item.isDirectory()) {
+                              if (prefix.endsWith("/")) {
+                                  return Paths.get(item.getName()).getFileName().toString();
+                              } else {
+                                  return Paths.get(item.getName()).toString();
+                              }
                           }
-                      }
-                      return Paths.get(item.getName()).getFileName().toString();
-                    })
-                  .collect(Collectors.toList());
-              return new BackupProvider.KeysPage(keys, response.getContinuationToken());
+                          return Paths.get(item.getName()).getFileName().toString();
+                      })
+                  .forEach(path -> keys.add(path));
+                  continuationToken = response.getContinuationToken();
+              }
+              return new BackupProvider.KeysPage(keys, continuationToken);
           } else {
               return new BackupProvider.KeysPage(Collections.emptyList(), null);
           }
