@@ -106,7 +106,13 @@ public class AzureBlobBackupProvider implements BackupProvider {
   public CompletableFuture<Void> putObject(final String key, final InputStream inputStream, final Long contentLength) {
       logInfo("put '%s'", rootPrefix + key);
       return CompletableFuture.runAsync(() -> {
-          fsClient.getFileClient(rootPrefix + key).upload(inputStream, contentLength);
+          DataLakePathClient fileClient = fsClient.getFileClient(rootPrefix + key);
+          // No-op if file already exists (as per BackupProvider spec)
+          if (fileClient.exists()) {
+              logInfo("put '%s' - file already exists, skipping upload", rootPrefix + key);
+              return;
+          }
+          fileClient.upload(inputStream, contentLength);
       });
   }
 
