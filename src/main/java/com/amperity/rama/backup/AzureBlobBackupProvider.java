@@ -190,6 +190,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           logInfo("listNonRecursive '%s'", finalPrefix);
           ListPathsOptions options = new ListPathsOptions();
           options.setPath(finalPrefix);
+          options.setRecursive(false);
           PagedResponse<PathItem> response;
           try {
               response = fsClient
@@ -198,36 +199,19 @@ public class AzureBlobBackupProvider implements BackupProvider {
                   .iterator()
                   .next();
           } catch (DataLakeStorageException e) {
-              if (e.getErrorCode().equals("PathNotFound")) {
+              if (e.getErrorCode().equals(PATH_NOT_FOUND)) {
                   return new BackupProvider.KeysPage(Collections.emptyList(), null);
               } else {
                   throw e;
               }
           }
-          List<String> keys = new ArrayList<>();
-          String continuationToken = null;
-          boolean isDir = fsClient.getFileClient(finalPrefix).getProperties().isDirectory();
-          if (isDir && !finalPrefix.endsWith("/")) {
-              keys.add(prefix);
-          } else {
-              response
-                  .getElements()
-                  .stream()
-                  .map(item -> {
-                      logInfo("  listNonRecursive child '%s' -> '%s'", item.getName(), item.getName().replaceFirst(finalPrefix, ""));
-                      if (item.isDirectory()) {
-                          if (prefix.endsWith("/")) {
-                              return Paths.get(item.getName()).getFileName().toString();
-                          } else {
-                              return Paths.get(item.getName()).toString();
-                          }
-                      }
-                      return Paths.get(item.getName()).getFileName().toString();
-                  })
-              .forEach(path -> keys.add(path));
-              continuationToken = response.getContinuationToken();
-          }
-          return new BackupProvider.KeysPage(keys, continuationToken);
+          // Extract just the filename/dirname (last path component) from each item
+          List<String> keys = response
+              .getElements()
+              .stream()
+              .map(item -> Paths.get(item.getName()).getFileName().toString())
+              .collect(Collectors.toList());
+          return new BackupProvider.KeysPage(keys, response.getContinuationToken());
       });
   }
 
