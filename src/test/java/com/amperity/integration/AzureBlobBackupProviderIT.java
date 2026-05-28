@@ -50,6 +50,23 @@ public class AzureBlobBackupProviderIT {
     return storageAccount + ":" + container + "/" + pathSuffix;
   }
 
+  /**
+   * Recursively deletes all files in the provider's root path to ensure clean test state.
+   */
+  private static void cleanupTestData(BackupProvider provider) throws Exception {
+    BackupProvider.KeysPage page = provider.listKeysRecursive("", null).get();
+    while (page != null && !page.keys.isEmpty()) {
+      for (String key : page.keys) {
+        provider.deleteObject(key).get();
+      }
+      if (page.nextPageMarker != null) {
+        page = provider.listKeysRecursive("", page.nextPageMarker).get();
+      } else {
+        break;
+      }
+    }
+  }
+
   public void testAzureBlobProvider() throws Exception {
     final String k = "a/b/c";
     final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
@@ -59,6 +76,7 @@ public class AzureBlobBackupProviderIT {
       BackupProvider provider;
 
       provider = new AzureBlobBackupProvider(getAzureLocation("brandon91"));
+      cleanupTestData(provider);
 
       testing("  when empty");
 
@@ -200,6 +218,7 @@ public class AzureBlobBackupProviderIT {
       BackupProvider provider;
 
       provider = new AzureBlobBackupProvider(getAzureLocation("brandon92"));
+      cleanupTestData(provider);
 
       BackupProviderTester.testProvider(provider);
 
