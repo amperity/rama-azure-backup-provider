@@ -25,6 +25,7 @@ import com.azure.core.http.rest.PagedResponse;
 import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobStorageException;
+import com.azure.storage.file.datalake.DataLakeFileClient;
 import com.azure.storage.file.datalake.DataLakeFileSystemClient;
 import com.azure.storage.file.datalake.DataLakeServiceClient;
 import com.azure.storage.file.datalake.DataLakePathClient;
@@ -114,7 +115,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
               throw new CompletionException(new InterruptedException("Upload was cancelled"));
           }
 
-          DataLakePathClient fileClient = fsClient.getFileClient(rootPrefix + key);
+          DataLakeFileClient fileClient = fsClient.getFileClient(rootPrefix + key);
           // No-op if file already exists (as per BackupProvider spec)
           if (fileClient.exists()) {
               logInfo("put '%s' - file already exists, skipping upload", rootPrefix + key);
@@ -122,7 +123,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           }
 
           try {
-              fileClient.upload(inputStream, contentLength);
+              fileClient.upload(inputStream, contentLength, false);
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
               if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException) {
