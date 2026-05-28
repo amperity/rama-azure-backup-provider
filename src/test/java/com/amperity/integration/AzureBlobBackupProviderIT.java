@@ -34,10 +34,11 @@ public class AzureBlobBackupProviderIT {
   }
 
   /**
-   * Gets Azure storage configuration from environment variables.
-   * Returns format: <storage-account>:<container>[/path]
+   * Gets Azure storage configuration with unique test path per run.
+   * Uses timestamp to ensure test isolation and prevent interference from previous runs.
+   * Returns format: <storage-account>:<container>/test-<timestamp>
    */
-  private static String getAzureLocation(String pathSuffix) {
+  private static String getAzureLocation() {
     String storageAccount = System.getenv("AZURE_STORAGE_ACCOUNT");
     String container = System.getenv("AZURE_CONTAINER");
 
@@ -47,46 +48,35 @@ public class AzureBlobBackupProviderIT {
       container = "test";
     }
 
-    return storageAccount + ":" + container + "/" + pathSuffix;
+    // Generate unique path per test run to avoid interference
+    String uniquePath = "test-" + System.currentTimeMillis();
+    return storageAccount + ":" + container + "/" + uniquePath;
   }
 
   /**
-   * Recursively deletes all files and directories in the provider's root path to ensure clean test state.
+   * Recursively deletes all files in the provider's root path for cleanup.
+   * Silently ignores any errors during cleanup.
    */
-  private static void cleanupTestData(BackupProvider provider) throws Exception {
-    // First delete all files recursively
-    BackupProvider.KeysPage page = provider.listKeysRecursive("", null).get();
-    while (page != null && !page.keys.isEmpty()) {
-      for (String key : page.keys) {
-        try {
-          provider.deleteObject(key).get();
-        } catch (Exception e) {
-          // Ignore errors during cleanup
-        }
-      }
-      if (page.nextPageMarker != null) {
-        page = provider.listKeysRecursive("", page.nextPageMarker).get();
-      } else {
-        break;
-      }
-    }
-
-    // Then delete directories from deepest to shallowest
-    // This is a workaround for Azure Data Lake's directory handling
-    for (int depth = 10; depth >= 0; depth--) {
-      page = provider.listKeysRecursive("", null).get();
-      if (page == null || page.keys.isEmpty()) break;
-
-      for (String key : page.keys) {
-        int slashCount = key.length() - key.replace("/", "").length();
-        if (slashCount == depth) {
+  private static void cleanupTestData(BackupProvider provider) {
+    try {
+      BackupProvider.KeysPage page = provider.listKeysRecursive("", null).get();
+      while (page != null && !page.keys.isEmpty()) {
+        for (String key : page.keys) {
           try {
             provider.deleteObject(key).get();
           } catch (Exception e) {
             // Ignore errors during cleanup
           }
         }
+        if (page.nextPageMarker != null) {
+          page = provider.listKeysRecursive("", page.nextPageMarker).get();
+        } else {
+          break;
+        }
       }
+    } catch (Exception e) {
+      // Silently ignore cleanup errors
+      System.err.println("Cleanup warning: " + e.getMessage());
     }
   }
 
@@ -94,12 +84,11 @@ public class AzureBlobBackupProviderIT {
     final String k = "a/b/c";
     final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
 
+    BackupProvider provider = null;
     try {
       testing("An Azure Blob provider");
-      BackupProvider provider;
 
-      provider = new AzureBlobBackupProvider(getAzureLocation("brandon91"));
-      cleanupTestData(provider);
+      provider = new AzureBlobBackupProvider(getAzureLocation());
 
       testing("  when empty");
 
@@ -224,6 +213,11 @@ public class AzureBlobBackupProviderIT {
       }
       System.err.println("done");
     } finally {
+      // Cleanup Azure test data
+      if (provider != null) {
+        cleanupTestData(provider);
+      }
+      // Cleanup local temp directory
       try (Stream<java.nio.file.Path> pathStream = Files.walk(dir)) {
         pathStream
             .sorted(Comparator.reverseOrder())
@@ -235,17 +229,21 @@ public class AzureBlobBackupProviderIT {
 
   public void testAzureBlobProviderTester() throws Exception {
     final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
+    BackupProvider provider = null;
 
     try {
       testing("An Azure Blob provider");
-      BackupProvider provider;
 
-      provider = new AzureBlobBackupProvider(getAzureLocation("brandon92"));
-      cleanupTestData(provider);
+      provider = new AzureBlobBackupProvider(getAzureLocation());
 
       BackupProviderTester.testProvider(provider);
 
     } finally {
+      // Cleanup Azure test data
+      if (provider != null) {
+        cleanupTestData(provider);
+      }
+      // Cleanup local temp directory
       try (Stream<java.nio.file.Path> pathStream = Files.walk(dir)) {
         pathStream
             .sorted(Comparator.reverseOrder())
