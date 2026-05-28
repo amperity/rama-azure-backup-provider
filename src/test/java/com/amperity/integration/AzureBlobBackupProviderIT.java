@@ -33,6 +33,23 @@ public class AzureBlobBackupProviderIT {
     return String.format("%0" + length + "d", num);
   }
 
+  /**
+   * Gets Azure storage configuration from environment variables.
+   * Returns format: <storage-account>:<container>[/path]
+   */
+  private static String getAzureLocation(String pathSuffix) {
+    String storageAccount = System.getenv("AZURE_STORAGE_ACCOUNT");
+    String container = System.getenv("AZURE_CONTAINER");
+
+    if (storageAccount == null || container == null) {
+      System.err.println("WARNING: AZURE_STORAGE_ACCOUNT and AZURE_CONTAINER not set, using test defaults");
+      storageAccount = "amperityaztest";
+      container = "test";
+    }
+
+    return storageAccount + ":" + container + "/" + pathSuffix;
+  }
+
   public void testAzureBlobProvider() throws Exception {
     final String k = "a/b/c";
     final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
@@ -41,8 +58,7 @@ public class AzureBlobBackupProviderIT {
       testing("An Azure Blob provider");
       BackupProvider provider;
 
-      // TODO: get from env
-      provider = new AzureBlobBackupProvider("amperityaztest:test/brandon91");
+      provider = new AzureBlobBackupProvider(getAzureLocation("brandon91"));
 
       testing("  when empty");
 
@@ -183,8 +199,7 @@ public class AzureBlobBackupProviderIT {
       testing("An Azure Blob provider");
       BackupProvider provider;
 
-      // TODO: get from env
-      provider = new AzureBlobBackupProvider("amperityaztest:test/brandon92");
+      provider = new AzureBlobBackupProvider(getAzureLocation("brandon92"));
 
       BackupProviderTester.testProvider(provider);
 
