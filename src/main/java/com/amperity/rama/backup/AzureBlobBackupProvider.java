@@ -42,6 +42,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
 
   private final DataLakeFileSystemClient fsClient;
   private final String rootPrefix;
+  private final ExecutorService executor;
 
   private static final Duration LIST_PATHS_TIMEOUT = Duration.ofSeconds(30);
   private static final int DEFAULT_PAGE_SIZE = 1000;
@@ -77,6 +78,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           .credential(credential)
           .buildClient();
       fsClient = serviceClient.getFileSystemClient(containerName);
+      executor = Executors.newCachedThreadPool();
   }
 
   @Override
@@ -106,14 +108,30 @@ public class AzureBlobBackupProvider implements BackupProvider {
   public CompletableFuture<Void> putObject(final String key, final InputStream inputStream, final Long contentLength) {
       logInfo("put '%s'", rootPrefix + key);
       return CompletableFuture.runAsync(() -> {
+          // Check for cancellation before starting
+          if (Thread.currentThread().isInterrupted()) {
+              logInfo("put '%s' - cancelled before upload started", rootPrefix + key);
+              throw new CompletionException(new InterruptedException("Upload was cancelled"));
+          }
+
           DataLakePathClient fileClient = fsClient.getFileClient(rootPrefix + key);
           // No-op if file already exists (as per BackupProvider spec)
           if (fileClient.exists()) {
               logInfo("put '%s' - file already exists, skipping upload", rootPrefix + key);
               return;
           }
-          fileClient.upload(inputStream, contentLength);
-      });
+
+          try {
+              fileClient.upload(inputStream, contentLength);
+          } catch (Exception e) {
+              // Check if this was due to interruption/cancellation
+              if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException) {
+                  logInfo("put '%s' - upload cancelled", rootPrefix + key);
+                  throw new CompletionException(new InterruptedException("Upload was cancelled"));
+              }
+              throw e;
+          }
+      }, executor);
   }
 
   @Override
@@ -215,5 +233,6 @@ public class AzureBlobBackupProvider implements BackupProvider {
 
   @Override
   public void close() {
+      executor.shutdown();
   }
 }
