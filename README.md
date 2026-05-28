@@ -1,35 +1,46 @@
-A backup provider for Rama that uses AWS S3.
+A backup provider for Rama that uses Azure Blob Storage (Azure Data Lake Storage Gen2).
 
 # Usage
 
-To use the provider, download the provided jar from the [releases page](https://github.com/redplanetlabs/rama-s3-backup-provider/releases) and include it in the `lib/` directory of the Conductor and Supervisor nodes.
+To use the provider, download the provided jar from the releases page and include it in the `lib/` directory of the Conductor and Supervisor nodes.
 
 Set the `backup.provider` config to:
 
-`com.rpl.rama.backup.s3.S3BackupProvider <bucket-name>`
+`com.amperity.rama.backup.AzureBlobBackupProvider <storage-account-name>:<container-name>`
 
-Replace `<bucket-name>` with the name of the bucket you wish to use.
+Or to use a subdirectory within the container:
 
-It is advisable to create the bucket with the desired permissions and
-other configuration.  However, the provider will try to create the
-bucket if it does not exist.
+`com.amperity.rama.backup.AzureBlobBackupProvider <storage-account-name>:<container-name>/<path>`
+
+Replace `<storage-account-name>` with your Azure storage account name, `<container-name>` with the container you wish to use, and optionally `<path>` with a subdirectory path.
+
+It is advisable to create the container with the desired permissions and configuration before using it with Rama.
 
 # Credentials
 
-The Rama s3-provider use the AWS [default provider chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html) to determine credentials.
+The Azure backup provider uses the Azure [DefaultAzureCredential](https://learn.microsoft.com/en-us/java/api/com.azure.identity.defaultazurecredential) authentication flow, which supports multiple authentication methods in the following order:
 
-The recommended way to provide credentials when running Rama on AWS is
-to use [instance profiles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html).
+1. Environment variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`)
+2. Managed Identity (when running on Azure)
+3. Azure CLI credentials
+4. Azure PowerShell credentials
+5. Interactive browser authentication
+
+The recommended way to provide credentials when running Rama on Azure is to use [Managed Identity](https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview).
+
+For local development, use `az login` to authenticate with the Azure CLI.
 
 # Tests
 
-The tests use a docker container to run adobe/s3mock, which provides a
-mock of the Amazon S3 service.
+To run integration tests:
 
-On mac you may need to set DOCKER_HOST, e.g.
+```bash
+mvn verify
+```
 
-`export DOCKER_HOST=unix:///${HOME}/.docker/run/docker.sock`
+The tests require valid Azure credentials (see Credentials section above) and expect the following environment variables:
 
-To run integration tests
+- `AZURE_STORAGE_ACCOUNT`: The Azure storage account name
+- `AZURE_CONTAINER`: The container name (optionally with path prefix)
 
-`mvn verify`
+Alternatively, you can hardcode test configuration in the test files, but using environment variables is recommended.
