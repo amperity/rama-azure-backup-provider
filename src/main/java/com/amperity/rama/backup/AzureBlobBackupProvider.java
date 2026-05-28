@@ -116,14 +116,10 @@ public class AzureBlobBackupProvider implements BackupProvider {
           }
 
           DataLakeFileClient fileClient = fsClient.getFileClient(rootPrefix + key);
-          // No-op if file already exists (as per BackupProvider spec)
-          if (fileClient.exists()) {
-              logInfo("put '%s' - file already exists, skipping upload", rootPrefix + key);
-              return;
-          }
 
           try {
-              fileClient.upload(inputStream, contentLength, false);
+              // Always upload, overwriting if file exists (matching S3 behavior)
+              fileClient.upload(inputStream, contentLength, true);
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
               if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException) {
@@ -206,11 +202,25 @@ public class AzureBlobBackupProvider implements BackupProvider {
                   throw e;
               }
           }
-          // Extract just the filename/dirname (last path component) from each item
+          // Map items to their names following S3 pattern:
+          // - Files: just the filename
+          // - Directories: filename if prefix ends with "/", otherwise full relative path
           List<String> keys = response
               .getElements()
               .stream()
-              .map(item -> Paths.get(item.getName()).getFileName().toString())
+              .map(item -> {
+                  if (item.isDirectory()) {
+                      String dirPath = item.getName().replaceFirst(rootPrefix, "");
+                      // If prefix ends with "/", return just the directory name
+                      // Otherwise return the full path relative to root
+                      return prefix.endsWith("/")
+                          ? Paths.get(dirPath).getFileName().toString()
+                          : dirPath;
+                  } else {
+                      // For files, always return just the filename
+                      return Paths.get(item.getName()).getFileName().toString();
+                  }
+              })
               .collect(Collectors.toList());
           return new BackupProvider.KeysPage(keys, response.getContinuationToken());
       });
