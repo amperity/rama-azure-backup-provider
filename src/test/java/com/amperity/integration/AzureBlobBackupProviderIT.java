@@ -51,18 +51,41 @@ public class AzureBlobBackupProviderIT {
   }
 
   /**
-   * Recursively deletes all files in the provider's root path to ensure clean test state.
+   * Recursively deletes all files and directories in the provider's root path to ensure clean test state.
    */
   private static void cleanupTestData(BackupProvider provider) throws Exception {
+    // First delete all files recursively
     BackupProvider.KeysPage page = provider.listKeysRecursive("", null).get();
     while (page != null && !page.keys.isEmpty()) {
       for (String key : page.keys) {
-        provider.deleteObject(key).get();
+        try {
+          provider.deleteObject(key).get();
+        } catch (Exception e) {
+          // Ignore errors during cleanup
+        }
       }
       if (page.nextPageMarker != null) {
         page = provider.listKeysRecursive("", page.nextPageMarker).get();
       } else {
         break;
+      }
+    }
+
+    // Then delete directories from deepest to shallowest
+    // This is a workaround for Azure Data Lake's directory handling
+    for (int depth = 10; depth >= 0; depth--) {
+      page = provider.listKeysRecursive("", null).get();
+      if (page == null || page.keys.isEmpty()) break;
+
+      for (String key : page.keys) {
+        int slashCount = key.length() - key.replace("/", "").length();
+        if (slashCount == depth) {
+          try {
+            provider.deleteObject(key).get();
+          } catch (Exception e) {
+            // Ignore errors during cleanup
+          }
+        }
       }
     }
   }
