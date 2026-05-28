@@ -185,6 +185,21 @@ public class AzureBlobBackupProvider implements BackupProvider {
       return CompletableFuture.supplyAsync(() -> {
           String finalPrefix = rootPrefix + prefix;
           logInfo("listNonRecursive '%s'", finalPrefix);
+
+          // Special case: if prefix doesn't end with "/" and is itself a directory,
+          // S3 would return it in commonPrefixes. Match this behavior.
+          if (!prefix.isEmpty() && !prefix.endsWith("/")) {
+              try {
+                  DataLakePathClient pathClient = fsClient.getFileClient(finalPrefix);
+                  if (pathClient.exists() && pathClient.getProperties().isDirectory()) {
+                      // Return the directory itself, not its contents
+                      return new BackupProvider.KeysPage(Collections.singletonList(prefix), null);
+                  }
+              } catch (Exception e) {
+                  // If we can't determine, fall through to normal listing
+              }
+          }
+
           ListPathsOptions options = new ListPathsOptions();
           options.setPath(finalPrefix);
           options.setRecursive(false);
