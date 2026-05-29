@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import com.azure.core.credential.TokenCredential;
 import com.azure.core.http.rest.PagedResponse;
 import com.azure.identity.DefaultAzureCredentialBuilder;
+import com.azure.identity.ManagedIdentityCredentialBuilder;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.file.datalake.DataLakeFileClient;
@@ -73,7 +74,14 @@ public class AzureBlobBackupProvider implements BackupProvider {
           containerName = containerName.substring(0, pathIndex);
       }
       String endpoint = String.format("https://%s.dfs.core.windows.net/", storageAccountName);
-      TokenCredential credential = new DefaultAzureCredentialBuilder().build();
+      // Use ManagedIdentityCredential directly for faster authentication on Azure VMs
+      // Falls back to DefaultAzureCredential if AZURE_USE_DEFAULT_CREDENTIAL=true
+      TokenCredential credential;
+      if ("true".equalsIgnoreCase(System.getenv("AZURE_USE_DEFAULT_CREDENTIAL"))) {
+          credential = new DefaultAzureCredentialBuilder().build();
+      } else {
+          credential = new ManagedIdentityCredentialBuilder().build();
+      }
       DataLakeServiceClient serviceClient = new DataLakeServiceClientBuilder()
           .endpoint(endpoint)
           .credential(credential)
