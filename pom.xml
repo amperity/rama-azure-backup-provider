@@ -4,7 +4,7 @@
 
   <groupId>com.rpl</groupId>
   <artifactId>rama-azure-blob-backup-provider</artifactId>
-  <version>1.6.0</version>
+  <version>1.1.0</version>
   <name>Azure Blob Backup Provider</name>
   <description>A backup provider for Rama clusters that stores data in Azure Blob.</description>
 
