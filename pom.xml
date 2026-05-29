@@ -43,18 +43,21 @@
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-core</artifactId>
       <version>1.5.18</version>
+      <scope>provided</scope>
     </dependency>
 
-<dependency>
-    <groupId>ch.qos.logback</groupId>
-    <artifactId>logback-classic</artifactId>
-    <version>1.5.18</version>
-</dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>1.5.18</version>
+      <scope>provided</scope>
+    </dependency>
+
     <dependency>
       <groupId>com.rpl</groupId>
       <artifactId>rama</artifactId>
       <version>1.6.0</version>
-      <!--<scope>provided</scope>-->
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
