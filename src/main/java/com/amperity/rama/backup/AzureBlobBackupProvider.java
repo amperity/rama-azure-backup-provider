@@ -126,8 +126,14 @@ public class AzureBlobBackupProvider implements BackupProvider {
           DataLakeFileClient fileClient = fsClient.getFileClient(rootPrefix + key);
 
           try {
-              // Always upload, overwriting if file exists (matching S3 behavior)
-              fileClient.upload(inputStream, contentLength, true);
+              if (contentLength == 0) {
+                  // Azure rejects upload() with Content-Length: 0
+                  // Create empty file using create() instead (matching S3 behavior for empty objects)
+                  fileClient.create(true);  // overwrite=true
+              } else {
+                  // Always upload, overwriting if file exists (matching S3 behavior)
+                  fileClient.upload(inputStream, contentLength, true);
+              }
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
               if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException) {
