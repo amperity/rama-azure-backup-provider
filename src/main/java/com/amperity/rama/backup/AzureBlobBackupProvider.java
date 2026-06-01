@@ -87,6 +87,33 @@ public class AzureBlobBackupProvider implements BackupProvider {
       );
   }
 
+  /**
+   * Checks if an exception represents a "not found" error from Azure storage.
+   * Handles both BlobStorageException and DataLakeStorageException.
+   *
+   * @param e the exception to check
+   * @return true if this is a "not found" error, false otherwise
+   */
+  private static boolean isNotFoundException(Exception e) {
+      if (e instanceof BlobStorageException) {
+          return ((BlobStorageException) e).getErrorCode().equals(BlobErrorCode.BLOB_NOT_FOUND);
+      }
+      if (e instanceof DataLakeStorageException) {
+          return ((DataLakeStorageException) e).getErrorCode().equals(PATH_NOT_FOUND);
+      }
+      return false;
+  }
+
+  /**
+   * Converts a relative key to a full path by prepending the root prefix.
+   *
+   * @param key the relative key
+   * @return the full path including root prefix
+   */
+  private String toFullPath(String key) {
+      return rootPrefix + key;
+  }
+
   public AzureBlobBackupProvider(final String location) throws IllegalArgumentException {
       if (location == null || location.trim().isEmpty()) {
           throw new IllegalArgumentException("Location cannot be null or empty");
@@ -132,33 +159,26 @@ public class AzureBlobBackupProvider implements BackupProvider {
   @Override
   @SuppressWarnings("unchecked")
   public <T extends InputStream> CompletableFuture<T> getObject(final String key) {
-      logInfo("get '%s'", rootPrefix + key);
+      logInfo("get '%s'", toFullPath(key));
       return CompletableFuture.<T>supplyAsync(() -> {
           try {
-              return (T) fsClient.getFileClient(rootPrefix + key).openInputStream().getInputStream();
-          } catch (BlobStorageException e) {
-              if (e.getErrorCode().equals(BlobErrorCode.BLOB_NOT_FOUND)) {
+              return (T) fsClient.getFileClient(toFullPath(key)).openInputStream().getInputStream();
+          } catch (Exception e) {
+              if (isNotFoundException(e)) {
                   return null;
-              } else {
-                  throw e;
               }
-          } catch (DataLakeStorageException e) {
-              if (e.getErrorCode().equals("PathNotFound")) {
-                  return null;
-              } else {
-                  throw e;
-              }
+              throw e;
           }
       });
   }
 
   @Override
   public CompletableFuture<Void> putObject(final String key, final InputStream inputStream, final Long contentLength) {
-      logInfo("put '%s'", rootPrefix + key);
+      logInfo("put '%s'", toFullPath(key));
       return CompletableFuture.runAsync(() -> {
           // Check for cancellation before starting
           if (Thread.currentThread().isInterrupted()) {
-              logInfo("put '%s' - cancelled before upload started", rootPrefix + key);
+              logInfo("put '%s' - cancelled before upload started", toFullPath(key));
               throw new CompletionException(new InterruptedException("Upload was cancelled"));
           }
 
@@ -166,7 +186,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
               throw new IllegalArgumentException("contentLength cannot be null");
           }
 
-          DataLakeFileClient fileClient = fsClient.getFileClient(rootPrefix + key);
+          DataLakeFileClient fileClient = fsClient.getFileClient(toFullPath(key));
 
           try {
               if (contentLength == 0) {
@@ -180,7 +200,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
               if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException) {
-                  logInfo("put '%s' - upload cancelled", rootPrefix + key);
+                  logInfo("put '%s' - upload cancelled", toFullPath(key));
                   throw new CompletionException(new InterruptedException("Upload was cancelled"));
               }
               throw e;
@@ -190,24 +210,24 @@ public class AzureBlobBackupProvider implements BackupProvider {
 
   @Override
   public CompletableFuture<Void> deleteObject(final String key) {
-      logInfo("delete '%s'", rootPrefix + key);
+      logInfo("delete '%s'", toFullPath(key));
       return CompletableFuture.runAsync(() -> {
-          fsClient.getFileClient(rootPrefix + key).delete();
+          fsClient.getFileClient(toFullPath(key)).delete();
       });
   }
 
   @Override
   public CompletableFuture<Boolean> hasKey(final String key) {
-      logInfo("exists? '%s'", rootPrefix + key);
+      logInfo("exists? '%s'", toFullPath(key));
       return CompletableFuture.supplyAsync(() -> {
-          return fsClient.getFileClient(rootPrefix + key).exists();
+          return fsClient.getFileClient(toFullPath(key)).exists();
       });
   }
 
   @Override
   public CompletableFuture<BackupProvider.KeysPage> listKeysRecursive(final String prefix, final String paginationKey) {
       return CompletableFuture.supplyAsync(() -> {
-          String finalPrefix = rootPrefix + prefix;
+          String finalPrefix = toFullPath(prefix);
           logInfo("listRecursive '%s'", finalPrefix);
           ListPathsOptions options = new ListPathsOptions();
           options.setPath(finalPrefix);
@@ -240,7 +260,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
   @Override
   public CompletableFuture<BackupProvider.KeysPage> listKeysNonRecursive(final String prefix, final String paginationKey, final int pageSize) {
       return CompletableFuture.supplyAsync(() -> {
-          String finalPrefix = rootPrefix + prefix;
+          String finalPrefix = toFullPath(prefix);
           logInfo("listNonRecursive '%s'", finalPrefix);
 
           // Special case: if prefix doesn't end with "/" and is itself a directory,
