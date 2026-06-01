@@ -8,11 +8,9 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -77,6 +75,29 @@ public class AzureBlobBackupProviderIT {
     } catch (Exception e) {
       // Silently ignore cleanup errors
       System.err.println("Cleanup warning: " + e.getMessage());
+    }
+  }
+
+  /**
+   * Cleans up both Azure storage and local temporary directory.
+   * Handles null provider and directory gracefully.
+   */
+  private static void cleanupResources(BackupProvider provider, java.nio.file.Path dir) {
+    // Cleanup Azure test data
+    if (provider != null) {
+      cleanupTestData(provider);
+    }
+    // Cleanup local temp directory
+    if (dir != null) {
+      try (Stream<java.nio.file.Path> pathStream = Files.walk(dir)) {
+        pathStream
+            .sorted(Comparator.reverseOrder())
+            .map(java.nio.file.Path::toFile)
+            .forEach(File::delete);
+      } catch (Exception e) {
+        // Silently ignore cleanup errors
+        System.err.println("Local cleanup warning: " + e.getMessage());
+      }
     }
   }
 
@@ -213,17 +234,7 @@ public class AzureBlobBackupProviderIT {
       }
       System.err.println("done");
     } finally {
-      // Cleanup Azure test data
-      if (provider != null) {
-        cleanupTestData(provider);
-      }
-      // Cleanup local temp directory
-      try (Stream<java.nio.file.Path> pathStream = Files.walk(dir)) {
-        pathStream
-            .sorted(Comparator.reverseOrder())
-            .map(java.nio.file.Path::toFile)
-            .forEach(File::delete);
-      }
+      cleanupResources(provider, dir);
     }
   }
 
@@ -239,17 +250,7 @@ public class AzureBlobBackupProviderIT {
       BackupProviderTester.testProvider(provider);
 
     } finally {
-      // Cleanup Azure test data
-      if (provider != null) {
-        cleanupTestData(provider);
-      }
-      // Cleanup local temp directory
-      try (Stream<java.nio.file.Path> pathStream = Files.walk(dir)) {
-        pathStream
-            .sorted(Comparator.reverseOrder())
-            .map(java.nio.file.Path::toFile)
-            .forEach(File::delete);
-      }
+      cleanupResources(provider, dir);
     }
   }
 }

@@ -3,14 +3,9 @@ package com.amperity.rama.backup;
 import com.rpl.rama.backup.BackupProvider;
 import com.rpl.rama.backup.BackupProvider.KeysPage;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
-import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -20,7 +15,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +51,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
   private static final int QUEUE_SIZE = 1000;
 
   private static void logInfo(String fmt, String... args) {
-      LOGGER.info("INFO: " + String.format(fmt, args));
+      LOGGER.info(String.format(fmt, args));
   }
 
   /**
