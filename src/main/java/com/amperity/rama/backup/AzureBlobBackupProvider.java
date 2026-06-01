@@ -14,7 +14,11 @@ import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.time.Duration;
@@ -49,9 +53,38 @@ public class AzureBlobBackupProvider implements BackupProvider {
   private static final Duration LIST_PATHS_TIMEOUT = Duration.ofSeconds(30);
   private static final int DEFAULT_PAGE_SIZE = 1000;
   private static final String PATH_NOT_FOUND = "PathNotFound";
+  private static final int MAX_THREADS = 100;
+  private static final int QUEUE_SIZE = 1000;
 
   private static void logInfo(String fmt, String... args) {
       LOGGER.info("INFO: " + String.format(fmt, args));
+  }
+
+  /**
+   * Creates a bounded thread pool executor with named daemon threads.
+   * Similar to Executors.newCachedThreadPool() but with upper bounds to prevent
+   * resource exhaustion under high load.
+   *
+   * @param namePrefix prefix for thread names (e.g., "AzureBlobBackupProvider")
+   * @param maxThreads maximum number of threads (sized for Rama cluster workloads)
+   * @return configured ExecutorService with bounded thread pool
+   */
+  private static ExecutorService createBoundedExecutor(String namePrefix, int maxThreads) {
+      AtomicInteger threadNumber = new AtomicInteger(1);
+      ThreadFactory threadFactory = runnable -> {
+          Thread thread = new Thread(runnable, namePrefix + "-" + threadNumber.getAndIncrement());
+          thread.setDaemon(true);
+          return thread;
+      };
+
+      return new ThreadPoolExecutor(
+          0,                                      // corePoolSize (same as cached pool)
+          maxThreads,                             // maximumPoolSize (bounded)
+          60L, TimeUnit.SECONDS,                  // keepAliveTime (same as cached pool)
+          new LinkedBlockingQueue<>(QUEUE_SIZE),  // bounded work queue
+          threadFactory,
+          new ThreadPoolExecutor.CallerRunsPolicy() // backpressure when queue is full
+      );
   }
 
   public AzureBlobBackupProvider(final String location) throws IllegalArgumentException {
@@ -87,7 +120,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           .credential(credential)
           .buildClient();
       fsClient = serviceClient.getFileSystemClient(containerName);
-      executor = Executors.newCachedThreadPool();
+      executor = createBoundedExecutor("AzureBlobBackupProvider", MAX_THREADS);
   }
 
   @Override
