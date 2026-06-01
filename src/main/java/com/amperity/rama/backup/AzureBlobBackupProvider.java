@@ -88,12 +88,18 @@ public class AzureBlobBackupProvider implements BackupProvider {
   }
 
   public AzureBlobBackupProvider(final String location) throws IllegalArgumentException {
-      String[] parts = location.split(":");
-      if (parts.length != 2) {
-          throw new IllegalArgumentException("Invalid argument to construct a backup provider: expected a string in the format <storage-account-name>:<blob-container-name>");
+      if (location == null || location.trim().isEmpty()) {
+          throw new IllegalArgumentException("Location cannot be null or empty");
       }
-      String storageAccountName = parts[0];
-      String containerName = parts[1];
+
+      String[] parts = location.split(":", 2);
+      if (parts.length != 2 || parts[0].trim().isEmpty() || parts[1].trim().isEmpty()) {
+          throw new IllegalArgumentException(
+              "Invalid location format. Expected: <storage-account-name>:<container-name>[/path], got: " + location);
+      }
+
+      String storageAccountName = parts[0].trim();
+      String containerName = parts[1].trim();
       int pathIndex = containerName.indexOf("/");
       if (pathIndex == -1) {
           rootPrefix = "";
@@ -154,6 +160,10 @@ public class AzureBlobBackupProvider implements BackupProvider {
           if (Thread.currentThread().isInterrupted()) {
               logInfo("put '%s' - cancelled before upload started", rootPrefix + key);
               throw new CompletionException(new InterruptedException("Upload was cancelled"));
+          }
+
+          if (contentLength == null) {
+              throw new IllegalArgumentException("contentLength cannot be null");
           }
 
           DataLakeFileClient fileClient = fsClient.getFileClient(rootPrefix + key);
@@ -238,12 +248,14 @@ public class AzureBlobBackupProvider implements BackupProvider {
           if (!prefix.isEmpty() && !prefix.endsWith("/")) {
               try {
                   DataLakePathClient pathClient = fsClient.getFileClient(finalPrefix);
-                  if (pathClient.exists() && pathClient.getProperties().isDirectory()) {
+                  // Check properties directly - no need for separate exists() check
+                  // which creates a race condition (file could be deleted between calls)
+                  if (pathClient.getProperties().isDirectory()) {
                       // Return the directory itself, not its contents
                       return new BackupProvider.KeysPage(Collections.singletonList(prefix), null);
                   }
-              } catch (Exception e) {
-                  // If we can't determine, fall through to normal listing
+              } catch (DataLakeStorageException e) {
+                  // Path doesn't exist or isn't accessible - fall through to normal listing
               }
           }
 
