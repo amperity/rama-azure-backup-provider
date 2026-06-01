@@ -190,8 +190,29 @@ public class AzureBlobBackupProvider implements BackupProvider {
 
           try {
               if (contentLength == 0) {
-                  // Azure rejects upload() with Content-Length: 0
-                  // Create empty file using create() instead (matching S3 behavior for empty objects)
+                  // Azure Data Lake Storage Gen2 limitation: upload() rejects Content-Length: 0
+                  //
+                  // Azure returns HTTP 400 - InvalidHeaderValue error:
+                  //   {
+                  //     "error": {
+                  //       "code": "InvalidHeaderValue",
+                  //       "message": "The value for one of the HTTP headers is not in the correct format",
+                  //       "detail": {
+                  //         "HeaderName": "Content-Length",
+                  //         "HeaderValue": "0"
+                  //       }
+                  //     }
+                  //   }
+                  //
+                  // This is a validation error thrown before upload attempt. Azure API validates that
+                  // Content-Length header cannot be "0" even though it's a valid HTTP header value.
+                  //
+                  // Workaround: Use create() instead of upload() for zero-byte files.
+                  // This matches S3 behavior which accepts empty objects.
+                  //
+                  // References:
+                  // - https://learn.microsoft.com/en-us/rest/api/storageservices/datalakestoragegen2/path/create
+                  // - https://learn.microsoft.com/en-us/rest/api/storageservices/datalakestoragegen2/path/update
                   fileClient.create(true);  // overwrite=true
               } else {
                   // Always upload, overwriting if file exists (matching S3 behavior)
