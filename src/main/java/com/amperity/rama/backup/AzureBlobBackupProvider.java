@@ -50,10 +50,6 @@ public class AzureBlobBackupProvider implements BackupProvider {
   private static final int MAX_THREADS = 100;
   private static final int QUEUE_SIZE = 1000;
 
-  private static void logInfo(String fmt, String... args) {
-      LOGGER.info(String.format(fmt, args));
-  }
-
   /**
    * Creates a bounded thread pool executor with named daemon threads.
    * Similar to Executors.newCachedThreadPool() but with upper bounds to prevent
@@ -120,6 +116,17 @@ public class AzureBlobBackupProvider implements BackupProvider {
       }
 
       String storageAccountName = parts[0].trim();
+
+      // Validate Azure storage account name format
+      // Rules: 3-24 characters, lowercase letters and numbers only
+      if (storageAccountName.length() < 3 || storageAccountName.length() > 24) {
+          throw new IllegalArgumentException(
+              "Invalid storage account name '" + storageAccountName + "': must be between 3 and 24 characters");
+      }
+      if (!storageAccountName.matches("^[a-z0-9]+$")) {
+          throw new IllegalArgumentException(
+              "Invalid storage account name '" + storageAccountName + "': must contain only lowercase letters and numbers");
+      }
       String containerName = parts[1].trim();
       int pathIndex = containerName.indexOf("/");
       if (pathIndex == -1) {
@@ -153,7 +160,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
   @Override
   @SuppressWarnings("unchecked")
   public <T extends InputStream> CompletableFuture<T> getObject(final String key) {
-      logInfo("get '%s'", toFullPath(key));
+      LOGGER.info("get '{}'", toFullPath(key));
       return CompletableFuture.<T>supplyAsync(() -> {
           try {
               return (T) fsClient.getFileClient(toFullPath(key)).openInputStream().getInputStream();
@@ -163,16 +170,16 @@ public class AzureBlobBackupProvider implements BackupProvider {
               }
               throw e;
           }
-      });
+      }, executor);
   }
 
   @Override
   public CompletableFuture<Void> putObject(final String key, final InputStream inputStream, final Long contentLength) {
-      logInfo("put '%s'", toFullPath(key));
+      LOGGER.info("put '{}'", toFullPath(key));
       return CompletableFuture.runAsync(() -> {
           // Check for cancellation before starting
           if (Thread.currentThread().isInterrupted()) {
-              logInfo("put '%s' - cancelled before upload started", toFullPath(key));
+              LOGGER.info("put '{}' - cancelled before upload started", toFullPath(key));
               throw new CompletionException(new InterruptedException("Upload was cancelled"));
           }
 
@@ -215,7 +222,7 @@ public class AzureBlobBackupProvider implements BackupProvider {
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
               if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException) {
-                  logInfo("put '%s' - upload cancelled", toFullPath(key));
+                  LOGGER.info("put '{}' - upload cancelled", toFullPath(key));
                   throw new CompletionException(new InterruptedException("Upload was cancelled"));
               }
               throw e;
@@ -225,25 +232,25 @@ public class AzureBlobBackupProvider implements BackupProvider {
 
   @Override
   public CompletableFuture<Void> deleteObject(final String key) {
-      logInfo("delete '%s'", toFullPath(key));
+      LOGGER.info("delete '{}'", toFullPath(key));
       return CompletableFuture.runAsync(() -> {
           fsClient.getFileClient(toFullPath(key)).delete();
-      });
+      }, executor);
   }
 
   @Override
   public CompletableFuture<Boolean> hasKey(final String key) {
-      logInfo("exists? '%s'", toFullPath(key));
+      LOGGER.info("exists? '{}'", toFullPath(key));
       return CompletableFuture.supplyAsync(() -> {
           return fsClient.getFileClient(toFullPath(key)).exists();
-      });
+      }, executor);
   }
 
   @Override
   public CompletableFuture<BackupProvider.KeysPage> listKeysRecursive(final String prefix, final String paginationKey) {
       return CompletableFuture.supplyAsync(() -> {
           String finalPrefix = toFullPath(prefix);
-          logInfo("listRecursive '%s'", finalPrefix);
+          LOGGER.info("listRecursive '{}'", finalPrefix);
           ListPathsOptions options = new ListPathsOptions();
           options.setPath(finalPrefix);
           options.setRecursive(true);
@@ -266,17 +273,24 @@ public class AzureBlobBackupProvider implements BackupProvider {
               .stream()
               .filter(item -> !item.isDirectory())
               // modify paths to be relative to the backup provider's root
-              .map(item -> item.getName().replaceFirst(rootPrefix, ""))
+              .map(item -> {
+                  String name = item.getName();
+                  // Remove rootPrefix using substring to avoid regex interpretation
+                  if (!rootPrefix.isEmpty() && name.startsWith(rootPrefix)) {
+                      return name.substring(rootPrefix.length());
+                  }
+                  return name;
+              })
               .collect(Collectors.toList());
           return new BackupProvider.KeysPage(keys, response.getContinuationToken());
-      });
+      }, executor);
   }
 
   @Override
   public CompletableFuture<BackupProvider.KeysPage> listKeysNonRecursive(final String prefix, final String paginationKey, final int pageSize) {
       return CompletableFuture.supplyAsync(() -> {
           String finalPrefix = toFullPath(prefix);
-          logInfo("listNonRecursive '%s'", finalPrefix);
+          LOGGER.info("listNonRecursive '{}'", finalPrefix);
 
           // Special case: if prefix doesn't end with "/" and is itself a directory,
           // S3 would return it in commonPrefixes. Match this behavior.
@@ -318,25 +332,49 @@ public class AzureBlobBackupProvider implements BackupProvider {
               .getElements()
               .stream()
               .map(item -> {
+                  String name = item.getName();
+                  // Remove rootPrefix using substring to avoid regex interpretation
+                  String relativePath;
+                  if (!rootPrefix.isEmpty() && name.startsWith(rootPrefix)) {
+                      relativePath = name.substring(rootPrefix.length());
+                  } else {
+                      relativePath = name;
+                  }
+
                   if (item.isDirectory()) {
-                      String dirPath = item.getName().replaceFirst(rootPrefix, "");
                       // If prefix ends with "/", return just the directory name
                       // Otherwise return the full path relative to root
                       return prefix.endsWith("/")
-                          ? Paths.get(dirPath).getFileName().toString()
-                          : dirPath;
+                          ? Paths.get(relativePath).getFileName().toString()
+                          : relativePath;
                   } else {
                       // For files, always return just the filename
-                      return Paths.get(item.getName()).getFileName().toString();
+                      return Paths.get(name).getFileName().toString();
                   }
               })
               .collect(Collectors.toList());
           return new BackupProvider.KeysPage(keys, response.getContinuationToken());
-      });
+      }, executor);
   }
 
   @Override
   public void close() {
       executor.shutdown();
+      try {
+          // Wait for existing tasks to complete
+          if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+              // Force shutdown if tasks didn't complete
+              executor.shutdownNow();
+              // Wait again for forced shutdown to complete
+              if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                  LOGGER.warn("Executor did not terminate after forced shutdown");
+              }
+          }
+      } catch (InterruptedException e) {
+          // Current thread was interrupted, force shutdown immediately
+          executor.shutdownNow();
+          // Preserve interrupt status
+          Thread.currentThread().interrupt();
+      }
   }
 }
