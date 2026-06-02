@@ -53,7 +53,7 @@ public class AzureBlobBackupProviderIT {
 
   /**
    * Recursively deletes all files in the provider's root path for cleanup.
-   * Silently ignores any errors during cleanup.
+   * Logs any errors during cleanup for debugging.
    */
   private static void cleanupTestData(BackupProvider provider) {
     try {
@@ -63,7 +63,8 @@ public class AzureBlobBackupProviderIT {
           try {
             provider.deleteObject(key).get();
           } catch (Exception e) {
-            // Ignore errors during cleanup
+            System.err.println("Failed to delete key '" + key + "' during cleanup:");
+            e.printStackTrace();
           }
         }
         if (page.nextPageMarker != null) {
@@ -73,8 +74,8 @@ public class AzureBlobBackupProviderIT {
         }
       }
     } catch (Exception e) {
-      // Silently ignore cleanup errors
-      System.err.println("Cleanup warning: " + e.getMessage());
+      System.err.println("Cleanup failed during listing:");
+      e.printStackTrace();
     }
   }
 
@@ -95,8 +96,8 @@ public class AzureBlobBackupProviderIT {
             .map(java.nio.file.Path::toFile)
             .forEach(File::delete);
       } catch (Exception e) {
-        // Silently ignore cleanup errors
-        System.err.println("Local cleanup warning: " + e.getMessage());
+        System.err.println("Local cleanup failed for directory " + dir + ":");
+        e.printStackTrace();
       }
     }
   }
