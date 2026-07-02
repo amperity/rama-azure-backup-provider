@@ -18,17 +18,15 @@ It is advisable to create the container with the desired permissions and configu
 
 # Credentials
 
-The Azure backup provider uses the Azure [DefaultAzureCredential](https://learn.microsoft.com/en-us/java/api/com.azure.identity.defaultazurecredential) authentication flow, which supports multiple authentication methods in the following order:
+By default the provider authenticates with [Managed Identity](https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview), which is the recommended way to provide credentials when running Rama on Azure. Managed Identity only works on an Azure VM — off-VM it fails trying to reach the instance metadata endpoint (`169.254.169.254`).
+
+For local development, set `AZURE_USE_DEFAULT_CREDENTIAL=true` to switch to the Azure [DefaultAzureCredential](https://learn.microsoft.com/en-us/java/api/com.azure.identity.defaultazurecredential) flow, which supports multiple authentication methods in the following order:
 
 1. Environment variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`)
 2. Managed Identity (when running on Azure)
-3. Azure CLI credentials
+3. Azure CLI credentials (`az login`)
 4. Azure PowerShell credentials
 5. Interactive browser authentication
-
-The recommended way to provide credentials when running Rama on Azure is to use [Managed Identity](https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview).
-
-For local development, use `az login` to authenticate with the Azure CLI.
 
 # Tests
 
@@ -44,3 +42,21 @@ The tests require valid Azure credentials (see Credentials section above) and ex
 - `AZURE_CONTAINER`: The container name (optionally with path prefix)
 
 Alternatively, you can hardcode test configuration in the test files, but using environment variables is recommended.
+
+## Running locally
+
+The suite talks to a real storage account, so a local run needs Azure CLI credentials rather than Managed Identity:
+
+```bash
+az login                                    # authenticate the Azure CLI
+export AZURE_USE_DEFAULT_CREDENTIAL=true    # use CLI creds instead of Managed Identity
+export AZURE_STORAGE_ACCOUNT=amperityaztest # test storage account
+export AZURE_CONTAINER=test
+mvn verify
+```
+
+Notes:
+
+- Without `AZURE_USE_DEFAULT_CREDENTIAL=true` the provider tries Managed Identity and each test hangs for ~170s before failing with a `NoRouteToHost` to `169.254.169.254`.
+- The logged-in identity needs a data-plane role (e.g. **Storage Blob Data Contributor**) on the account; control-plane roles alone return 403 on blob operations.
+- If the storage account restricts network access, connect to the VPN first.
