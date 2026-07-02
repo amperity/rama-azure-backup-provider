@@ -239,6 +239,38 @@ public class AzureBlobBackupProviderIT {
     }
   }
 
+  public void testPutObjectStreamLongerThanContentLength() throws Exception {
+    final String k = "len/mismatch";
+    final java.nio.file.Path dir = Files.createTempDirectory("testLenMismatch");
+
+    BackupProvider provider = null;
+    try {
+      testing("An Azure Blob provider");
+
+      provider = new AzureBlobBackupProvider(getAzureLocation());
+
+      testing("  tolerates a stream longer than the declared contentLength (BASS-4703)");
+      // The stream yields 5 bytes but we declare 3. Before the fix Azure's upload() aborted with
+      // UnexpectedLengthException; now the stream is bounded to contentLength and the put succeeds.
+      provider
+          .putObject(k, new ByteArrayInputStream("abcde".getBytes(StandardCharsets.UTF_8)), 3L)
+          .get();
+
+      testing("    stores exactly the first contentLength bytes");
+      {
+        InputStream inputStream = provider.getObject(k).get();
+        String text =
+            new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+                .lines()
+                .collect(Collectors.joining("\n"));
+        assertEquals("abc", text);
+      }
+      System.err.println("done");
+    } finally {
+      cleanupResources(provider, dir);
+    }
+  }
+
   public void testAzureBlobProviderTester() throws Exception {
     final java.nio.file.Path dir = Files.createTempDirectory("testAzureBlobProvider");
     BackupProvider provider = null;

@@ -2,6 +2,8 @@ package com.amperity.rama.backup;
 
 import com.rpl.rama.backup.BackupProvider;
 import com.rpl.rama.backup.BackupProvider.KeysPage;
+import java.io.FilterInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Paths;
 import java.util.Collections;
@@ -216,8 +218,19 @@ public class AzureBlobBackupProvider implements BackupProvider {
                   // - https://learn.microsoft.com/en-us/rest/api/storageservices/datalakestoragegen2/path/update
                   fileClient.create(true);  // overwrite=true
               } else {
-                  // Always upload, overwriting if file exists (matching S3 behavior)
-                  fileClient.upload(inputStream, contentLength, true);
+                  // Bound the stream to exactly contentLength bytes before handing it to Azure.
+                  //
+                  // Azure's upload() strictly validates the emitted byte count against the declared
+                  // length and aborts with UnexpectedLengthException if the stream yields even one
+                  // extra byte. Rama can hand us a stream slightly longer than the contentLength it
+                  // reports; the S3 provider tolerates this by reading only contentLength bytes, so
+                  // the stored object is always exactly contentLength bytes there. Bounding here
+                  // matches that behavior and stores a byte-identical, restorable object.
+                  //
+                  // A stream that is *shorter* than contentLength is left untouched, so a genuine
+                  // truncation still surfaces as an UnexpectedLengthException rather than silently
+                  // storing a short object. See BASS-4703.
+                  fileClient.upload(new BoundedInputStream(inputStream, contentLength), contentLength, true);
               }
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
@@ -355,6 +368,60 @@ public class AzureBlobBackupProvider implements BackupProvider {
               .collect(Collectors.toList());
           return new BackupProvider.KeysPage(keys, response.getContinuationToken());
       }, executor);
+  }
+
+  /**
+   * Wraps an InputStream so that at most {@code limit} bytes can be read from it, regardless of how
+   * many bytes the underlying stream actually holds. Used to feed Azure's strict-length upload()
+   * exactly the declared contentLength; see the callsite in {@link #putObject}.
+   *
+   * <p>mark/reset are overridden to keep the remaining-byte counter consistent when the Azure SDK
+   * rewinds the stream to retry a request.
+   */
+  private static final class BoundedInputStream extends FilterInputStream {
+      private long remaining;
+      private long markedRemaining;
+
+      BoundedInputStream(final InputStream in, final long limit) {
+          super(in);
+          this.remaining = limit;
+      }
+
+      @Override
+      public int read() throws IOException {
+          if (remaining <= 0) {
+              return -1;
+          }
+          int b = super.read();
+          if (b != -1) {
+              remaining--;
+          }
+          return b;
+      }
+
+      @Override
+      public int read(final byte[] buf, final int off, final int len) throws IOException {
+          if (remaining <= 0) {
+              return -1;
+          }
+          int n = super.read(buf, off, (int) Math.min(len, remaining));
+          if (n > 0) {
+              remaining -= n;
+          }
+          return n;
+      }
+
+      @Override
+      public synchronized void mark(final int readlimit) {
+          super.mark(readlimit);
+          markedRemaining = remaining;
+      }
+
+      @Override
+      public synchronized void reset() throws IOException {
+          super.reset();
+          remaining = markedRemaining;
+      }
   }
 
   @Override
