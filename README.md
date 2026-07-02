@@ -2,7 +2,16 @@ A backup provider for Rama that uses Azure Blob Storage (Azure Data Lake Storage
 
 # Usage
 
-To use the provider, download the provided jar from the releases page and include it in the `lib/` directory of the Conductor and Supervisor nodes.
+The provider is not published to a package repository or a GitHub releases page. Build it from source and place the resulting jar in the `lib/` directory of the Conductor and Supervisor nodes:
+
+```bash
+mvn package
+# produces target/rama-azure-blob-backup-provider-<version>-jar-with-dependencies.jar
+```
+
+Use the `-jar-with-dependencies` (fat) jar — it bundles the Azure SDK, which is not otherwise on the Rama classpath.
+
+At Amperity this jar is uploaded to the `amperity-static-packages` S3 bucket and pulled onto the cluster by Salt; see [`salt/states/rama/init.sls`](https://github.com/amperity/app/blob/main/salt/states/rama/init.sls) in the `amperity/app` repo for the deployment wiring.
 
 Set the `backup.provider` config to:
 
