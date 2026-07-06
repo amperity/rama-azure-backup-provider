@@ -216,8 +216,19 @@ public class AzureBlobBackupProvider implements BackupProvider {
                   // - https://learn.microsoft.com/en-us/rest/api/storageservices/datalakestoragegen2/path/update
                   fileClient.create(true);  // overwrite=true
               } else {
-                  // Always upload, overwriting if file exists (matching S3 behavior)
-                  fileClient.upload(inputStream, contentLength, true);
+                  // Bound the stream to exactly contentLength bytes before handing it to Azure.
+                  //
+                  // Azure's upload() strictly validates the emitted byte count against the declared
+                  // length and aborts with UnexpectedLengthException if the stream yields even one
+                  // extra byte. Rama can hand us a stream slightly longer than the contentLength it
+                  // reports; the S3 provider tolerates this by reading only contentLength bytes, so
+                  // the stored object is always exactly contentLength bytes there. Bounding here
+                  // matches that behavior and stores a byte-identical, restorable object.
+                  //
+                  // A stream that is *shorter* than contentLength is left untouched, so a genuine
+                  // truncation still surfaces as an UnexpectedLengthException rather than silently
+                  // storing a short object. See BASS-4703.
+                  fileClient.upload(new BoundedInputStream(inputStream, contentLength), contentLength, true);
               }
           } catch (Exception e) {
               // Check if this was due to interruption/cancellation
