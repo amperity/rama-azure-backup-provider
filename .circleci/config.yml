@@ -1,0 +1,120 @@
+version: 2.1
+
+# CI and release for the Azure Blob backup provider.
+#
+#   build    - compile and assemble the jar-with-dependencies on every push/PR.
+#   release  - on a vX.Y.Z tag, verify the tag matches the pom version, publish
+#              the jar to a GitHub Release, and upload it to the
+#              amperity-static-packages S3 bucket that Salt pulls from.
+#
+# The integration tests are intentionally NOT run here: they require live Azure
+# credentials (see README) and hang ~170s on Managed Identity otherwise. `mvn
+# package` builds the jar without running them (failsafe binds to the
+# integration-test/verify phases, which come after package).
+#
+# ONBOARDING TODO (org admin, one-time):
+#   - Add this repo as a project in the CircleCI org.
+#   - Create a context (referenced below as `rama-azure-backup-provider-release`)
+#     providing:
+#       * GH_TOKEN                     - token that can create releases on this repo
+#       * STATIC_PACKAGES_AWS_ROLE_ARN - IAM role (CircleCI OIDC trust) allowed to
+#                                        s3:PutObject on
+#                                        amperity-static-packages/binaries/rama/*
+#   Until the context exists the `release` job cannot publish; `build` needs nothing.
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1.3
+
+executors:
+  # Build on JDK 8 to match maven.compiler.source/target (8) and the enforcer's
+  # requireJavaVersion. The cimg/openjdk images ship with Maven.
+  jdk8:
+    docker:
+      - image: cimg/openjdk:8.0
+    resource_class: medium
+
+jobs:
+  build:
+    executor: jdk8
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-m2-{{ checksum "pom.xml" }}
+            - v1-m2-
+      - run:
+          name: Build jar-with-dependencies
+          command: mvn -B -ntp package
+      - save_cache:
+          key: v1-m2-{{ checksum "pom.xml" }}
+          paths:
+            - ~/.m2/repository
+      - store_artifacts:
+          path: target
+          destination: target
+      - persist_to_workspace:
+          root: .
+          paths:
+            - target
+
+  release:
+    executor: jdk8
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Verify tag matches pom version
+          command: |
+            # Derive the version from the built artifact rather than invoking the
+            # maven-help-plugin, keeping this step offline and dependency-free.
+            FATJAR=$(ls target/rama-azure-blob-backup-provider-*-jar-with-dependencies.jar)
+            POM_VERSION=$(basename "$FATJAR" | sed -E 's/^rama-azure-blob-backup-provider-(.+)-jar-with-dependencies\.jar$/\1/')
+            if [ "v${POM_VERSION}" != "${CIRCLE_TAG}" ]; then
+              echo "Tag ${CIRCLE_TAG} does not match pom version v${POM_VERSION}." >&2
+              echo "Bump <version> in pom.xml and tag v<version> to match." >&2
+              exit 1
+            fi
+            echo "export POM_VERSION=${POM_VERSION}" >> "$BASH_ENV"
+      - run:
+          name: Install GitHub CLI
+          command: |
+            GH_VERSION=2.63.2
+            curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | tar xz
+            sudo mv "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+      - run:
+          name: Publish GitHub release
+          command: |
+            # The bundled jar is published under the clean, version-only name that
+            # Salt consumes (no -jar-with-dependencies suffix, no date stamp).
+            ASSET="rama-azure-blob-backup-provider-${POM_VERSION}.jar"
+            cp "target/rama-azure-blob-backup-provider-${POM_VERSION}-jar-with-dependencies.jar" "$ASSET"
+            gh release create "$CIRCLE_TAG" "$ASSET" --title "$CIRCLE_TAG" --generate-notes
+      - aws-cli/setup:
+          role_arn: "$STATIC_PACKAGES_AWS_ROLE_ARN"
+          region: us-west-2
+      - run:
+          name: Publish to amperity-static-packages
+          command: |
+            aws s3 cp \
+              "target/rama-azure-blob-backup-provider-${POM_VERSION}-jar-with-dependencies.jar" \
+              "s3://amperity-static-packages/binaries/rama/rama-azure-blob-backup-provider-${POM_VERSION}.jar"
+
+workflows:
+  ci:
+    jobs:
+      # Runs on every branch/PR, and also on release tags so `release` can require it.
+      - build:
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+      - release:
+          context:
+            - rama-azure-backup-provider-release
+          requires:
+            - build
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
