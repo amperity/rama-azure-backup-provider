@@ -1,35 +1,71 @@
-A backup provider for Rama that uses AWS S3.
+A backup provider for Rama that uses Azure Blob Storage (Azure Data Lake Storage Gen2).
 
 # Usage
 
-To use the provider, download the provided jar from the [releases page](https://github.com/redplanetlabs/rama-s3-backup-provider/releases) and include it in the `lib/` directory of the Conductor and Supervisor nodes.
+The provider is not published to a package repository or a GitHub releases page. Build it from source and place the resulting jar in the `lib/` directory of the Conductor and Supervisor nodes:
+
+```bash
+mvn package
+# produces target/rama-azure-blob-backup-provider-<version>-jar-with-dependencies.jar
+```
+
+Use the `-jar-with-dependencies` (fat) jar — it bundles the Azure SDK, which is not otherwise on the Rama classpath.
+
+At Amperity this jar is uploaded to the `amperity-static-packages` S3 bucket and pulled onto the cluster by Salt; see [`salt/states/rama/init.sls`](https://github.com/amperity/app/blob/main/salt/states/rama/init.sls) in the `amperity/app` repo for the deployment wiring.
 
 Set the `backup.provider` config to:
 
-`com.rpl.rama.backup.s3.S3BackupProvider <bucket-name>`
+`com.amperity.rama.backup.AzureBlobBackupProvider <storage-account-name>:<container-name>`
 
-Replace `<bucket-name>` with the name of the bucket you wish to use.
+Or to use a subdirectory within the container:
 
-It is advisable to create the bucket with the desired permissions and
-other configuration.  However, the provider will try to create the
-bucket if it does not exist.
+`com.amperity.rama.backup.AzureBlobBackupProvider <storage-account-name>:<container-name>/<path>`
+
+Replace `<storage-account-name>` with your Azure storage account name, `<container-name>` with the container you wish to use, and optionally `<path>` with a subdirectory path.
+
+It is advisable to create the container with the desired permissions and configuration before using it with Rama.
 
 # Credentials
 
-The Rama s3-provider use the AWS [default provider chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html) to determine credentials.
+By default the provider authenticates with [Managed Identity](https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview), which is the recommended way to provide credentials when running Rama on Azure. Managed Identity only works on an Azure VM — off-VM it fails trying to reach the instance metadata endpoint (`169.254.169.254`).
 
-The recommended way to provide credentials when running Rama on AWS is
-to use [instance profiles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html).
+For local development, set `AZURE_USE_DEFAULT_CREDENTIAL=true` to switch to the Azure [DefaultAzureCredential](https://learn.microsoft.com/en-us/java/api/com.azure.identity.defaultazurecredential) flow, which supports multiple authentication methods in the following order:
+
+1. Environment variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`)
+2. Managed Identity (when running on Azure)
+3. Azure CLI credentials (`az login`)
+4. Azure PowerShell credentials
+5. Interactive browser authentication
 
 # Tests
 
-The tests use a docker container to run adobe/s3mock, which provides a
-mock of the Amazon S3 service.
+To run integration tests:
 
-On mac you may need to set DOCKER_HOST, e.g.
+```bash
+mvn verify
+```
 
-`export DOCKER_HOST=unix:///${HOME}/.docker/run/docker.sock`
+The tests require valid Azure credentials (see Credentials section above) and expect the following environment variables:
 
-To run integration tests
+- `AZURE_STORAGE_ACCOUNT`: The Azure storage account name
+- `AZURE_CONTAINER`: The container name (optionally with path prefix)
 
-`mvn verify`
+Alternatively, you can hardcode test configuration in the test files, but using environment variables is recommended.
+
+## Running locally
+
+The suite talks to a real storage account, so a local run needs Azure CLI credentials rather than Managed Identity:
+
+```bash
+az login                                    # authenticate the Azure CLI
+export AZURE_USE_DEFAULT_CREDENTIAL=true    # use CLI creds instead of Managed Identity
+export AZURE_STORAGE_ACCOUNT=amperityaztest # test storage account
+export AZURE_CONTAINER=test
+mvn verify
+```
+
+Notes:
+
+- Without `AZURE_USE_DEFAULT_CREDENTIAL=true` the provider tries Managed Identity and each test hangs for ~170s before failing with a `NoRouteToHost` to `169.254.169.254`.
+- The logged-in identity needs a data-plane role (e.g. **Storage Blob Data Contributor**) on the account; control-plane roles alone return 403 on blob operations.
+- If the storage account restricts network access, connect to the VPN first.
